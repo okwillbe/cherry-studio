@@ -7,7 +7,8 @@ import { visualizer } from 'rollup-plugin-visualizer'
 // assert not supported by biome
 // import pkg from './package.json' assert { type: 'json' }
 import pkg from './package.json'
-
+//process Node.js 的全局对象 (Global Object) 它非常像 Java 中的 System 类 
+// type是变量名不是关键字
 const visualizerPlugin = (type: 'renderer' | 'main') => {
   return process.env[`VISUALIZER_${type.toUpperCase()}`] ? [visualizer({ open: true })] : []
 }
@@ -15,96 +16,123 @@ const visualizerPlugin = (type: 'renderer' | 'main') => {
 const isDev = process.env.NODE_ENV === 'development'
 const isProd = process.env.NODE_ENV === 'production'
 
+//默认导出
 export default defineConfig({
+  // ==========================================
+  // 1. Main Process (主进程) 配置
+  // 相当于后端的 "Server" 端，运行 Node.js 环境
+  // ==========================================
   main: {
-    plugins: [...visualizerPlugin('main')],
+    plugins: [...visualizerPlugin('main')], // 打包分析插件，用于查看主进程包体积
     resolve: {
+      // 路径别名映射，类似 Java 的 import com.company...
+      // 让代码中可以使用 @main/xxx 而不是 ../../../main/xxx
       alias: {
         '@main': resolve('src/main'),
         '@types': resolve('src/renderer/src/types'),
         '@shared': resolve('packages/shared'),
         '@logger': resolve('src/main/services/LoggerService'),
+        // MCP (Model Context Protocol) 相关的包映射
         '@mcp-trace/trace-core': resolve('packages/mcp-trace/trace-core'),
         '@mcp-trace/trace-node': resolve('packages/mcp-trace/trace-node')
       }
     },
     build: {
       rollupOptions: {
-        external: ['bufferutil', 'utf-8-validate', 'electron', ...Object.keys(pkg.dependencies)],
+        // 外部依赖配置：告诉打包工具这些包"不要"打进最终的 exe/js 文件里
+        // 就像 Java 中 provided 作用域的 jar 包，运行时由环境提供
+        external: ['bufferutil', 'utf-8-validate', 'electron', ...Object.keys(pkg.dependencies)], 
         output: {
-          manualChunks: undefined, // 彻底禁用代码分割 - 返回 null 强制单文件打包
-          inlineDynamicImports: true // 内联所有动态导入，这是关键配置
+          // 下面两个配置是为了强制将主进程代码打包成【单个 JS 文件】
+          // 这样做的好处是部署简单，启动时不用加载大量小文件，且避免某些 Electron 环境下的路径查找问题
+          manualChunks: undefined, // 禁用自动代码分割
+          inlineDynamicImports: true // 将所有 import() 动态导入变成同步代码合并到一个文件中
         },
+        // 忽略特定的警告信息（这里忽略了 ESM 和 CommonJS 混用的警告）
         onwarn(warning, warn) {
           if (warning.code === 'COMMONJS_VARIABLE_IN_ESM') return
           warn(warning)
         }
       },
-      sourcemap: isDev
+      sourcemap: isDev // 开发环境开启源码映射，方便断点调试；生产环境关闭
     },
+    // Esbuild 优化配置：生产环境移除所有注释，减小体积
     esbuild: isProd ? { legalComments: 'none' } : {},
     optimizeDeps: {
-      noDiscovery: isDev
+      noDiscovery: isDev // 开发模式下不自动发现依赖，加快启动速度
     }
   },
+
+  // ==========================================
+  // 2. Preload (预加载脚本) 配置
+  // 它是连接 Main 和 Renderer 的桥梁，拥有部分 Node 权限
+  // ==========================================
   preload: {
     plugins: [
       react({
-        tsDecorators: true
+        tsDecorators: true // 允许在 TypeScript 中使用装饰器语法（类似 Java 的 @Annotation）
       })
     ],
     resolve: {
+      // 预加载脚本需要的别名，通常比主进程少
       alias: {
         '@shared': resolve('packages/shared'),
         '@mcp-trace/trace-core': resolve('packages/mcp-trace/trace-core')
       }
     },
     build: {
-      sourcemap: isDev
+      sourcemap: isDev // 同样，仅开发环境开启调试映射
     }
   },
+
+  // ==========================================
+  // 3. Renderer Process (渲染进程) 配置
+  // 相当于传统的 "前端"，运行 React 页面，Browser 环境
+  // ==========================================
   renderer: {
     plugins: [
+      // 动态导入 Tailwind CSS 的 Vite 插件（样式框架）
       (async () => (await import('@tailwindcss/vite')).default())(),
       react({
-        tsDecorators: true
+        tsDecorators: true // 支持 React 组件中使用装饰器
       }),
-      ...(isDev ? [CodeInspectorPlugin({ bundler: 'vite' })] : []), // 只在开发环境下启用 CodeInspectorPlugin
-      ...visualizerPlugin('renderer')
+      // 开发环境注入代码检查插件，允许在页面点击组件直接跳转到 IDE 源码
+      ...(isDev ? [CodeInspectorPlugin({ bundler: 'vite' })] : []), 
+      ...visualizerPlugin('renderer') // 渲染进程的包体积分析
     ],
     resolve: {
+      // 前端页面的别名非常多，映射了各个模块和 AI 核心库
       alias: {
         '@renderer': resolve('src/renderer/src'),
         '@shared': resolve('packages/shared'),
         '@types': resolve('src/renderer/src/types'),
         '@logger': resolve('src/renderer/src/services/LoggerService'),
-        '@mcp-trace/trace-core': resolve('packages/mcp-trace/trace-core'),
-        '@mcp-trace/trace-web': resolve('packages/mcp-trace/trace-web'),
-        '@cherrystudio/ai-core/provider': resolve('packages/aiCore/src/core/providers'),
-        '@cherrystudio/ai-core/built-in/plugins': resolve('packages/aiCore/src/core/plugins/built-in'),
+        // ... 一系列 AI 核心业务包和扩展包的映射
         '@cherrystudio/ai-core': resolve('packages/aiCore/src'),
         '@cherrystudio/extension-table-plus': resolve('packages/extension-table-plus/src'),
-        '@cherrystudio/ai-sdk-provider': resolve('packages/ai-sdk-provider/src')
+        // ... 其他路径
       }
     },
     optimizeDeps: {
-      exclude: ['pyodide'],
+      exclude: ['pyodide'], // 排除 pyodide（浏览器端 Python 运行库）的预构建，防止兼容性问题
       esbuildOptions: {
-        target: 'esnext' // for dev
+        target: 'esnext' // 开发环境使用最新的 JS 标准，构建速度最快
       }
     },
     worker: {
-      format: 'es'
+      format: 'es' // Web Worker 使用 ES Module 格式
     },
     build: {
-      target: 'esnext', // for build
+      target: 'esnext', // 生产构建目标为最新 JS 标准（Chromium 内核支持度很高）
       rollupOptions: {
+        // 【关键】多入口配置 (Multi-Page Application)
+        // 这说明你的应用不仅仅有一个主窗口，还有很多独立的子窗口或浮窗
         input: {
-          index: resolve(__dirname, 'src/renderer/index.html'),
-          miniWindow: resolve(__dirname, 'src/renderer/miniWindow.html'),
-          selectionToolbar: resolve(__dirname, 'src/renderer/selectionToolbar.html'),
-          selectionAction: resolve(__dirname, 'src/renderer/selectionAction.html'),
-          traceWindow: resolve(__dirname, 'src/renderer/traceWindow.html')
+          index: resolve(__dirname, 'src/renderer/index.html'),           // 主窗口
+          miniWindow: resolve(__dirname, 'src/renderer/miniWindow.html'), // 迷你悬浮窗
+          selectionToolbar: resolve(__dirname, 'src/renderer/selectionToolbar.html'), // 划词工具栏
+          selectionAction: resolve(__dirname, 'src/renderer/selectionAction.html'),   // 划词动作页
+          traceWindow: resolve(__dirname, 'src/renderer/traceWindow.html')            // 调试/追踪窗口
         },
         onwarn(warning, warn) {
           if (warning.code === 'COMMONJS_VARIABLE_IN_ESM') return
