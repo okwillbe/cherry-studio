@@ -19,13 +19,13 @@ const isProd = process.env.NODE_ENV === 'production'
 //默认导出
 export default defineConfig({
   // ==========================================
-  // 1. Main Process (主进程) 配置
-  // 相当于后端的 "Server" 端，运行 Node.js 环境
+  // 1. Main Process (主进程) 核心结构体
+  // 相当于后端的 "Server" 端，运行 Node.js 环境 类似后端 Server (SpringBoot)
   // ==========================================
   main: {
-    plugins: [...visualizerPlugin('main')], // 打包分析插件，用于查看主进程包体积
-    resolve: {
-      // 路径别名映射，类似 Java 的 import com.company...
+    plugins: [...visualizerPlugin('main')], // 打包分析插件，用于查看主进程包体积 plugins关键字 用来声明要使用的 Vite 插件 值必须是一个数组
+    resolve: { 
+      // resolve.alias 路径别名映射，类似 Java 的 import com.company...
       // 让代码中可以使用 @main/xxx 而不是 ../../../main/xxx
       alias: {
         '@main': resolve('src/main'),
@@ -37,10 +37,10 @@ export default defineConfig({
         '@mcp-trace/trace-node': resolve('packages/mcp-trace/trace-node')
       }
     },
-    build: {
-      rollupOptions: {
+    build: { //Vite 配置的内置属性名（关键字）。 控制打包构建行为。
+      rollupOptions: { //	Vite 内置关键字 配置对象的属性名
         // 外部依赖配置：告诉打包工具这些包"不要"打进最终的 exe/js 文件里
-        // 就像 Java 中 provided 作用域的 jar 包，运行时由环境提供
+        // Maven <scope>provided</scope>，运行时由环境提供
         external: ['bufferutil', 'utf-8-validate', 'electron', ...Object.keys(pkg.dependencies)], 
         output: {
           // 下面两个配置是为了强制将主进程代码打包成【单个 JS 文件】
@@ -64,7 +64,7 @@ export default defineConfig({
   },
 
   // ==========================================
-  // 2. Preload (预加载脚本) 配置
+  // 2. Preload (预加载脚本) 核心结构体
   // 它是连接 Main 和 Renderer 的桥梁，拥有部分 Node 权限
   // ==========================================
   preload: {
@@ -86,7 +86,7 @@ export default defineConfig({
   },
 
   // ==========================================
-  // 3. Renderer Process (渲染进程) 配置
+  // 3. Renderer Process (渲染进程) 核心结构体
   // 相当于传统的 "前端"，运行 React 页面，Browser 环境
   // ==========================================
   renderer: {
